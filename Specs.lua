@@ -48,7 +48,7 @@ ns.categories = {
 	{
 		key = "light", title = "Light & Sun",
 		B("bloomEnable", "Bloom", "Glow around bright areas."),
-		R("bloomUserMult", "Bloom intensity", 0, 3, 0.05, "The game's slider tops out at 1. Higher values are experimental."),
+		R("bloomUserMult", "Bloom intensity", 0, 3, 0.05, "The game's own Bloom slider (Graphics settings, build 70532+) runs 0 to 1 in steps of 0.2. Higher values are experimental."),
 		E("giQuality", "Global illumination quality", Levels(0, 3)),
 		R("specular", "Specular highlights", 0, 1, 0.05, "Shine on world surfaces."),
 		R("maxLightDist", "Max light distance", 0, 8192, 64, "How far away dynamic lights still render."),
