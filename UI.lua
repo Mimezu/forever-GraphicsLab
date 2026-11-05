@@ -176,27 +176,28 @@ local function ShowTooltip(row)
 	GameTooltip:Show()
 end
 
+-- Right-click menu of a row (GraphicsLab's own menu, see Popup.lua).
 local function RowMenu(row)
 	if row.item.spec.kind == "presets" then return end
 	local name = row.item.entry.name
-	MenuUtil.CreateContextMenu(row, function(_, root)
-		root:CreateTitle(name)
-		root:CreateButton("Restore my original value", function() ns.ResetOne(name) end)
-		local default = ns.Default(name)
-		local reset = root:CreateButton("Set to game default", function() Apply(row, default) end)
-		if default == nil then reset:SetEnabled(false) end
-		root:CreateDivider()
-		root:CreateCheckbox("Keep my value",
-			function() return ns.IsKept(name) end,
-			function() ns.SetKept(name, not ns.IsKept(name)) end)
-		if ns.CanResend(name) then
-			root:CreateCheckbox("Also re-send it every second (experimental)",
-				function() return ns.IsResent(name) end,
-				function() ns.SetResent(name, not ns.IsResent(name)) end)
-		end
-		root:CreateDivider()
-		root:CreateButton("Print name to chat", function() ns.Print("/console %s %s", name, tostring(ns.Get(name))) end)
-	end)
+	local default = ns.Default(name)
+	local entries = {
+		{ title = name },
+		{ text = "Restore my original value", func = function() ns.ResetOne(name) end },
+		{ text = "Set to game default", func = function() ApplyName(name, default) end, disabled = default == nil },
+		{ divider = true },
+		{ text = "Keep my value",
+			check = function() return ns.IsKept(name) end,
+			func = function() ns.SetKept(name, not ns.IsKept(name)) end },
+	}
+	if ns.CanResend(name) then
+		entries[#entries + 1] = { text = "Also re-send it every second (experimental)",
+			check = function() return ns.IsResent(name) end,
+			func = function() ns.SetResent(name, not ns.IsResent(name)) end }
+	end
+	entries[#entries + 1] = { divider = true }
+	entries[#entries + 1] = { text = "Print name to chat", func = function() ns.Print("/console %s %s", name, tostring(ns.Get(name))) end }
+	ns.OpenMenu(row, entries, true)
 end
 
 local function CreateRow(i)
@@ -302,13 +303,13 @@ local function EnsureDrop(row)
 	d:SetPoint("LEFT", CONTROL_X, 0)
 	d:SetScript("OnClick", function(self)
 		local spec, name = row.item.spec, row.item.entry.name
-		MenuUtil.CreateContextMenu(self, function(_, root)
-			for _, opt in ipairs(spec.options) do
-				root:CreateRadio(opt.text,
-					function() return ns.Same(ns.Get(name), opt.value) end,
-					function() Apply(row, opt.value) end)
-			end
-		end)
+		local entries = {}
+		for _, opt in ipairs(spec.options) do
+			entries[#entries + 1] = { text = opt.text,
+				radio = function() return ns.Same(ns.Get(name), opt.value) end,
+				func = function() ApplyName(name, opt.value) end }
+		end
+		ns.OpenMenu(self, entries)
 	end)
 	row.drop = d
 	return d
@@ -498,97 +499,87 @@ local function RefreshVisible(name)
 end
 ns.OnChange(RefreshVisible)
 
-StaticPopupDialogs["GRAPHICSLAB_RESTORE"] = {
-	text = "Restore all %d changed settings to the values you had before GraphicsLab changed them?",
-	button1 = YES, button2 = NO,
-	OnAccept = function() ns.Print("restored %d settings.", ns.RestoreAll()) end,
-	timeout = 0, whileDead = true, hideOnEscape = true,
-}
+-- Confirmations and the snapshot name are GraphicsLab's own dialogs (Popup.lua).
+local function AskRestore(n)
+	ns.ShowDialog({
+		text = ("Restore all %d changed settings to the values you had before GraphicsLab changed them?"):format(n),
+		accept = YES or "Yes", cancel = NO or "No",
+		onAccept = function() ns.Print("restored %d settings.", ns.RestoreAll()) end,
+	})
+end
+
 local function SaveSnapshotNamed(label)
 	ns.SaveSnapshot(label)
 	ns.Print("saved snapshot '%s'.", label)
 end
 
-StaticPopupDialogs["GRAPHICSLAB_OVERWRITE"] = {
-	text = "Replace the existing snapshot '%s' with the current settings?",
-	button1 = YES, button2 = NO,
-	OnAccept = function(_, label) SaveSnapshotNamed(label) end,
-	timeout = 0, whileDead = true, hideOnEscape = true,
-}
-StaticPopupDialogs["GRAPHICSLAB_DELETE"] = {
-	text = "Delete the snapshot '%s'?",
-	button1 = DELETE, button2 = CANCEL,
-	OnAccept = function(_, label)
-		ns.DeleteSnapshot(label)
-		ns.Print("deleted snapshot '%s'.", label)
-	end,
-	timeout = 0, whileDead = true, hideOnEscape = true,
-}
+local function AskSaveSnapshot()
+	ns.ShowDialog({
+		text = "Name this snapshot:",
+		accept = SAVE or "Save", cancel = CANCEL or "Cancel",
+		editBox = true, default = date("Snapshot %m-%d %H:%M"),
+		onAccept = function(label)
+			if not ns.Snapshots()[label] then return SaveSnapshotNamed(label) end
+			ns.ShowDialog({
+				text = ("Replace the existing snapshot '%s' with the current settings?"):format(label),
+				accept = YES or "Yes", cancel = NO or "No",
+				onAccept = function() SaveSnapshotNamed(label) end,
+			})
+		end,
+	})
+end
 
-StaticPopupDialogs["GRAPHICSLAB_SAVE"] = {
-	text = "Name this snapshot:",
-	button1 = SAVE, button2 = CANCEL,
-	hasEditBox = true,
-	OnShow = function(self) self:GetEditBox():SetText(date("Snapshot %m-%d %H:%M")) end,
-	OnAccept = function(self)
-		local label = strtrim(self:GetEditBox():GetText())
-		if label == "" then return end
-		if ns.Snapshots()[label] then
-			-- Defer: a popup cannot open another popup from inside its own accept handler.
-			C_Timer.After(0, function() StaticPopup_Show("GRAPHICSLAB_OVERWRITE", label, nil, label) end)
-		else
-			SaveSnapshotNamed(label)
-		end
-	end,
-	EditBoxOnEnterPressed = function(self)
-		StaticPopupDialogs["GRAPHICSLAB_SAVE"].OnAccept(self:GetParent())
-		self:GetParent():Hide()
-	end,
-	timeout = 0, whileDead = true, hideOnEscape = true,
-}
+local function AskDeleteSnapshot(label)
+	ns.ShowDialog({
+		text = ("Delete the snapshot '%s'?"):format(label),
+		accept = DELETE or "Delete", cancel = CANCEL or "Cancel",
+		onAccept = function()
+			ns.DeleteSnapshot(label)
+			ns.Print("deleted snapshot '%s'.", label)
+		end,
+	})
+end
 
 local function SnapshotMenu(owner)
-	MenuUtil.CreateContextMenu(owner, function(_, root)
-		root:CreateButton("Save current settings...", function() StaticPopup_Show("GRAPHICSLAB_SAVE") end)
-		local names = {}
-		for label in pairs(ns.Snapshots()) do names[#names + 1] = label end
-		table.sort(names)
-		if #names > 0 then
-			root:CreateDivider()
-			root:CreateTitle("Load")
-			for _, label in ipairs(names) do
-				local snap = ns.Snapshots()[label]
-				root:CreateButton(label .. "  |cff888888" .. snap.date .. "|r", function()
-					ns.Print("loaded '%s': %d settings changed.", label, ns.LoadSnapshot(label))
-				end)
-			end
-			root:CreateDivider()
-			local del = root:CreateButton("Delete")
-			for _, label in ipairs(names) do
-				del:CreateButton(label, function() StaticPopup_Show("GRAPHICSLAB_DELETE", label, nil, label) end)
-			end
+	local entries = { { text = "Save current settings...", func = AskSaveSnapshot } }
+	local names = {}
+	for label in pairs(ns.Snapshots()) do names[#names + 1] = label end
+	table.sort(names)
+	if #names > 0 then
+		entries[#entries + 1] = { divider = true }
+		entries[#entries + 1] = { title = "Load" }
+		for _, label in ipairs(names) do
+			local snap = ns.Snapshots()[label]
+			entries[#entries + 1] = { text = label .. "  |cff888888" .. snap.date .. "|r", func = function()
+				ns.Print("loaded '%s': %d settings changed.", label, ns.LoadSnapshot(label))
+			end }
 		end
-	end)
+		entries[#entries + 1] = { divider = true }
+		local del = {}
+		for _, label in ipairs(names) do
+			del[#del + 1] = { text = label, func = function() AskDeleteSnapshot(label) end }
+		end
+		entries[#entries + 1] = { text = "Delete", items = del }
+	end
+	ns.OpenMenu(owner, entries)
 end
 
 local function FogTestMenu(owner)
-	MenuUtil.CreateContextMenu(owner, function(_, root)
-		root:CreateTitle("Fog test")
-		if ns.FogTestRunning() then
-			root:CreateButton("Stop the running test", function() ns.StopFogTest() end)
-			return
-		end
-		root:CreateButton(("Full test (about %d seconds)"):format(ns.EstimateFogTest("full")), function() ns.AskFogTest("full") end)
-		root:CreateButton(("Quick test (about %d seconds)"):format(ns.EstimateFogTest("quick")), function() ns.AskFogTest("quick") end)
-		root:CreateButton(("More haze tests (about %d seconds)"):format(ns.EstimateFogTest("more")),
-			function() ns.AskFogTest("more") end)
-		local rec = ns.DB().fogtest
-		if rec and rec.started then
-			root:CreateDivider()
-			root:CreateTitle(("Last run: %s, %s%s"):format(rec.started, rec.zone or "?",
-				rec.stopped and (" (stopped: " .. rec.stopped .. ")") or ""))
-		end
-	end)
+	local entries = { { title = "Fog test" } }
+	if ns.FogTestRunning() then
+		entries[#entries + 1] = { text = "Stop the running test", func = function() ns.StopFogTest() end }
+		return ns.OpenMenu(owner, entries)
+	end
+	entries[#entries + 1] = { text = ("Full test (about %d seconds)"):format(ns.EstimateFogTest("full")), func = function() ns.AskFogTest("full") end }
+	entries[#entries + 1] = { text = ("Quick test (about %d seconds)"):format(ns.EstimateFogTest("quick")), func = function() ns.AskFogTest("quick") end }
+	entries[#entries + 1] = { text = ("More haze tests (about %d seconds)"):format(ns.EstimateFogTest("more")), func = function() ns.AskFogTest("more") end }
+	local rec = ns.DB().fogtest
+	if rec and rec.started then
+		entries[#entries + 1] = { divider = true }
+		entries[#entries + 1] = { title = ("Last run: %s, %s%s"):format(rec.started, rec.zone or "?",
+			rec.stopped and (" (stopped: " .. rec.stopped .. ")") or "") }
+	end
+	ns.OpenMenu(owner, entries)
 end
 
 local function MakeButton(parent, text, width, onClick)
@@ -639,6 +630,7 @@ local function CreateMainFrame()
 		frame:SetPoint(saved.point, UIParent, saved.relativePoint or saved.point, saved.x, saved.y)
 	end
 	frame:SetScript("OnShow", Render)
+	frame:HookScript("OnHide", ns.CloseMenu)
 	tinsert(UISpecialFrames, "GraphicsLabFrame")
 	frame.TitleText:SetText("GraphicsLab - extended graphics settings")
 
@@ -725,7 +717,7 @@ local function CreateMainFrame()
 	local restore = MakeButton(frame, "Restore originals", 140, function()
 		local n = ns.ChangedCount()
 		if n == 0 then return ns.Print("nothing to restore.") end
-		StaticPopup_Show("GRAPHICSLAB_RESTORE", n)
+		AskRestore(n)
 	end)
 	restore:SetPoint("BOTTOMLEFT", 12, 12)
 	local snaps = MakeButton(frame, "Snapshots", 110, function(self) SnapshotMenu(self) end)

@@ -334,7 +334,11 @@ function Finish(reason)
 	else
 		ns.Print("fog test finished: %d screenshots in %d seconds. Settings are back%s.",
 			r.good, seconds, clean and "" or ", except the ones listed above")
-		StaticPopup_Show("GRAPHICSLAB_FOGTEST_DONE", r.good)
+		ns.ShowDialog({
+			text = ("Fog test finished (%d screenshots).\n\nReload the interface now to save the results?"):format(r.good),
+			accept = RELOADUI or "Reload", cancel = LATER or "Later",
+			onAccept = function() if C_UI and C_UI.Reload then C_UI.Reload() else ReloadUI() end end,
+		})
 	end
 	if ns.Render then ns.Render() end
 end
@@ -440,25 +444,16 @@ ev:SetScript("OnEvent", function(_, event)
 	end
 end)
 
-StaticPopupDialogs["GRAPHICSLAB_FOGTEST"] = {
-	text = "Fog test (about %s seconds)\n\nGraphicsLab hides the interface, changes one fog setting at a time and takes screenshots. Everything is put back afterwards.\n\nStand still outdoors, look toward distant land with some sky, and don't touch the mouse or keyboard. Press any key to stop early.",
-	button1 = START or "Start", button2 = CANCEL,
-	OnAccept = function(_, mode)
-		-- Let the popup close before the interface is hidden.
-		C_Timer.After(0.3, function() ns.StartFogTest(mode) end)
-	end,
-	timeout = 0, whileDead = false, hideOnEscape = true,
-}
-
-StaticPopupDialogs["GRAPHICSLAB_FOGTEST_DONE"] = {
-	text = "Fog test finished (%d screenshots).\n\nReload the interface now to save the results?",
-	button1 = RELOADUI or "Reload", button2 = LATER or "Later",
-	OnAccept = function() if C_UI and C_UI.Reload then C_UI.Reload() else ReloadUI() end end,
-	timeout = 0, whileDead = true, hideOnEscape = true,
-}
-
+-- The start notice is GraphicsLab's own dialog (Popup.lua), not a Blizzard popup.
 function ns.AskFogTest(mode)
 	mode = mode or "full"
 	if run then return ns.Print("a fog test is already running.") end
-	StaticPopup_Show("GRAPHICSLAB_FOGTEST", ns.EstimateFogTest(mode), nil, mode)
+	ns.ShowDialog({
+		text = ("Fog test (about %d seconds)\n\nGraphicsLab hides the interface, changes one fog setting at a time and takes screenshots. Everything is put back afterwards.\n\nStand still outdoors, look toward distant land with some sky, and don't touch the mouse or keyboard. Press any key to stop early."):format(ns.EstimateFogTest(mode)),
+		accept = START or "Start", cancel = CANCEL or "Cancel",
+		onAccept = function()
+			-- Let the dialog close before the interface is hidden.
+			C_Timer.After(0.3, function() ns.StartFogTest(mode) end)
+		end,
+	})
 end

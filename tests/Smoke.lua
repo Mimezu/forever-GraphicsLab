@@ -1,7 +1,9 @@
 -- Run from the addon folder: lua5.1 tests/Smoke.lua
 -- Loads GraphicsLab against a mocked Forever client (CVars with engine side effects, events,
 -- timers, screenshots, interface visibility) and checks: /glab opens on the first try, kept
--- values come back, re-send, /glab probe (on demand, known names only), and the fog test (sequence, restore, stops, /reload recovery).
+-- values come back, re-send, /glab probe (on demand, known names only), the addon's own menus and
+-- dialogs (no Blizzard menu or popup code: that taints the gamepad UI), and the fog test (sequence,
+-- restore, stops, /reload recovery).
 -- The whole suite runs twice: CVAR_UPDATE delivered during SetCVar, and delivered a frame later.
 
 local realPrint = print
@@ -12,7 +14,7 @@ local function check(value, message)
 end
 
 local ADDON = "GraphicsLab"
-local FILES = { "Specs.lua", "Core.lua", "Trace.lua", "FogTest.lua", "UI.lua" }
+local FILES = { "Specs.lua", "Core.lua", "Trace.lua", "Popup.lua", "FogTest.lua", "UI.lua" }
 
 local function Suite(deferEvents)
 	---------------------------------------------------------------------------
@@ -209,7 +211,7 @@ local function Suite(deferEvents)
 	---------------------------------------------------------------------------
 	-- Client
 	---------------------------------------------------------------------------
-	local printed, popups, shots = {}, {}, 0
+	local printed, shots = {}, 0
 	local speed, combat, uiWorld, reloads = 0, false, true, 0
 	print = function(msg) printed[#printed + 1] = msg end
 	GetBuildInfo = function() return "1.60.1", "70009", "Sep 24 2026", 16001 end
@@ -225,9 +227,8 @@ local function Suite(deferEvents)
 	function wipe(t) for k in pairs(t) do t[k] = nil end return t end
 	function CopyTable(t) local c = {} for k, v in pairs(t) do c[k] = type(v) == "table" and CopyTable(v) or v end return c end
 	tinsert = table.insert
-	UISpecialFrames, SlashCmdList, StaticPopupDialogs = {}, {}, {}
-	function StaticPopup_Show(which, a1, a2, data) popups[#popups + 1] = { which = which, a1 = a1, data = data } end
-	MenuUtil = Universal
+	UISpecialFrames, SlashCmdList = {}, {}
+	-- Blizzard's menu and popup globals stay undefined on purpose: using them is an error here.
 	YES, NO, SAVE, CANCEL, DELETE = "Yes", "No", "Save", "Cancel", "Delete"
 	function InCombatLockdown() return combat end
 	function GetUnitSpeed() return speed end
@@ -292,6 +293,161 @@ local function Suite(deferEvents)
 	check(not GraphicsLabFrame:IsShown(), mode .. ": the second /glab closes it")
 	SlashCmdList.GRAPHICSLAB("")
 	check(GraphicsLabFrame:IsShown(), mode .. ": the third /glab opens it again")
+
+	---------------------------------------------------------------------------
+	-- The addon's own menus and dialogs (nothing from Blizzard's menu or popup code)
+	---------------------------------------------------------------------------
+	local menu = ns.Popup.menu
+	local function Texts(level)
+		local out = {}
+		for _, r in ipairs(menu.panels[level].rows) do if r.shown then out[#out + 1] = r.text.text end end
+		return out
+	end
+	local function MenuRow(level, text)
+		for _, r in ipairs(menu.panels[level].rows) do
+			if r.shown and r.text.text == text then return r end
+		end
+	end
+	local function ButtonNamed(text)
+		for _, fr in ipairs(allFrames) do if fr.text == text and fr.scripts.OnClick then return fr end end
+	end
+	local function ShownRow(name)
+		for _, fr in ipairs(allFrames) do
+			if fr.shown and fr.item and fr.reset and fr.item.entry.name == name then return fr end
+		end
+	end
+
+	-- Row menu: right-click a slider row.
+	local hrow = ShownRow("horizonStart")
+	check(hrow, mode .. ": horizonStart row shown in the fog view")
+	hrow.scripts.OnClick(hrow)
+	check(menu.open and menu.panels[1]:IsShown() and menu.catcher:IsShown(), mode .. ": right-click opens the row menu")
+	local texts = table.concat(Texts(1), "|")
+	check(texts:find("horizonStart|Restore my original value|Set to game default|", 1, true)
+		and texts:find("|Keep my value|Also re-send it every second (experimental)|", 1, true)
+		and texts:find("|Print name to chat", 1, true), mode .. ": the row menu has its entries (" .. texts .. ")")
+	local keepRow = MenuRow(1, "Keep my value")
+	check(keepRow.box.shown and not keepRow.tick.shown, mode .. ": Keep my value shows an empty box")
+	keepRow.scripts.OnClick(keepRow)
+	check(ns.IsKept("horizonStart"), mode .. ": clicking Keep my value keeps the value")
+	keepRow = MenuRow(1, "Keep my value")
+	check(menu.open and keepRow.tick.shown, mode .. ": the menu stays open and shows the check")
+	keepRow.scripts.OnClick(keepRow)
+	check(not ns.IsKept("horizonStart") and not MenuRow(1, "Keep my value").tick.shown, mode .. ": a second click clears it")
+	menu.catcher.scripts.OnKeyDown(menu.catcher, "ESCAPE")
+	check(not menu.open and not menu.panels[1]:IsShown() and not menu.catcher:IsShown(), mode .. ": Escape closes the menu")
+	hrow.scripts.OnClick(hrow)
+	check(menu.open, mode .. ": the menu opens again")
+	menu.catcher.scripts.OnMouseDown(menu.catcher)
+	check(not menu.open and not menu.catcher:IsShown(), mode .. ": a click outside closes it")
+	hrow.scripts.OnClick(hrow)
+	hrow.scripts.OnClick(hrow)
+	check(not menu.open, mode .. ": the row that opened it closes it again")
+	ns.Set("horizonStart", "3000")
+	hrow.scripts.OnClick(hrow)
+	local defRow = MenuRow(1, "Set to game default")
+	defRow.scripts.OnClick(defRow)
+	check(not menu.open and cvars.horizonStart == "2400", mode .. ": Set to game default applies and closes the menu")
+	ns.ResetOne("horizonStart")
+	hrow.scripts.OnClick(hrow)
+	SlashCmdList.GRAPHICSLAB("")
+	check(not GraphicsLabFrame:IsShown() and not menu.open, mode .. ": closing the window closes an open menu too")
+	SlashCmdList.GRAPHICSLAB("")
+
+	-- Enum dropdown: radio entries.
+	local vrow = ShownRow("graphicsViewDistance")
+	check(vrow and vrow.drop and vrow.drop.shown, mode .. ": the view distance row has a dropdown")
+	vrow.drop.scripts.OnClick(vrow.drop)
+	check(menu.open and #Texts(1) == 10, mode .. ": the dropdown lists the 10 choices")
+	local chosen = MenuRow(1, "8")
+	check(chosen.box.shown and chosen.tick.shown and not MenuRow(1, "3").tick.shown, mode .. ": the dot marks the current value")
+	MenuRow(1, "3").scripts.OnClick(MenuRow(1, "3"))
+	check(not menu.open and cvars.graphicsViewDistance == "2", mode .. ": a choice applies and closes")
+	ns.ResetOne("graphicsViewDistance")
+
+	-- Snapshots: save (name dialog), overwrite, load, delete (submenu + confirm).
+	local snapsButton = ButtonNamed("Snapshots")
+	check(snapsButton, mode .. ": Snapshots button")
+	snapsButton.scripts.OnClick(snapsButton)
+	check(menu.open and MenuRow(1, "Save current settings...") and MenuRow(1, "Delete")
+		and not table.concat(Texts(1), "|"):find("Test A", 1, true), mode .. ": the menu offers Save, and the login snapshot")
+	local saveRow = MenuRow(1, "Save current settings...")
+	saveRow.scripts.OnClick(saveRow)
+	local dlg = ns.Popup.dialog
+	check(not menu.open and dlg:IsShown() and dlg.edit:IsShown() and dlg.text.text == "Name this snapshot:", mode .. ": Save opens the name dialog")
+	check(dlg.edit:GetText():find("^Snapshot ") and dlg.accept.text == "Save", mode .. ": a dated name is suggested")
+	dlg.edit:SetText("  ")
+	dlg.accept.scripts.OnClick(dlg.accept)
+	check(dlg:IsShown(), mode .. ": an empty name keeps the dialog open")
+	dlg.edit:SetText("Test A")
+	dlg.edit.scripts.OnEnterPressed(dlg.edit)
+	check(not dlg:IsShown() and ns.Snapshots()["Test A"], mode .. ": Enter saves the snapshot")
+	check(lastPrint():find("saved snapshot 'Test A'", 1, true), mode .. ": and says so")
+	snapsButton.scripts.OnClick(snapsButton)
+	saveRow = MenuRow(1, "Save current settings...")
+	saveRow.scripts.OnClick(saveRow)
+	dlg.edit:SetText("Test A")
+	dlg.accept.scripts.OnClick(dlg.accept)
+	check(dlg:IsShown() and dlg.text.text:find("Replace the existing snapshot 'Test A'", 1, true) and not dlg.edit:IsShown(),
+		mode .. ": the same name asks before replacing")
+	dlg.scripts.OnKeyDown(dlg, "ESCAPE")
+	check(not dlg:IsShown(), mode .. ": Escape closes the dialog")
+	local before = ns.Snapshots()["Test A"].date
+	advance(61)
+	snapsButton.scripts.OnClick(snapsButton)
+	saveRow = MenuRow(1, "Save current settings...")
+	saveRow.scripts.OnClick(saveRow)
+	dlg.edit:SetText("Test A")
+	dlg.accept.scripts.OnClick(dlg.accept)
+	dlg.accept.scripts.OnClick(dlg.accept)
+	check(not dlg:IsShown() and ns.Snapshots()["Test A"].date ~= before, mode .. ": confirming replaces the snapshot")
+	snapsButton.scripts.OnClick(snapsButton)
+	texts = table.concat(Texts(1), "|")
+	check(texts:find("|Load|Before GraphicsLab  ", 1, true) and texts:find("|Test A  ", 1, true) and texts:find("|Delete$"),
+		mode .. ": the menu lists Load and Delete (" .. texts .. ")")
+	ns.Set("nearclip", "0.5")
+	local loadRow = MenuRow(1, "Test A  |cff888888" .. ns.Snapshots()["Test A"].date .. "|r")
+	loadRow.scripts.OnClick(loadRow)
+	advance(0.05)
+	check(not menu.open and cvars.nearclip == "0.2", mode .. ": loading a snapshot puts its values back")
+	snapsButton.scripts.OnClick(snapsButton)
+	local delRow = MenuRow(1, "Delete")
+	delRow.scripts.OnEnter(delRow)
+	check(menu.panels[2] and menu.panels[2]:IsShown() and MenuRow(2, "Test A"), mode .. ": hovering Delete opens the submenu")
+	delRow.scripts.OnClick(delRow)
+	check(not menu.panels[2]:IsShown(), mode .. ": clicking Delete again closes the submenu (gamepad cursor)")
+	delRow.scripts.OnClick(delRow)
+	check(menu.panels[2]:IsShown(), mode .. ": and opens it once more")
+	MenuRow(2, "Test A").scripts.OnClick(MenuRow(2, "Test A"))
+	check(not menu.open and dlg:IsShown() and dlg.text.text == "Delete the snapshot 'Test A'?" and dlg.accept.text == "Delete",
+		mode .. ": the snapshot asks before deleting")
+	dlg.cancel.scripts.OnClick(dlg.cancel)
+	check(not dlg:IsShown() and ns.Snapshots()["Test A"], mode .. ": Cancel keeps it")
+	snapsButton.scripts.OnClick(snapsButton)
+	MenuRow(1, "Delete").scripts.OnClick(MenuRow(1, "Delete"))
+	MenuRow(2, "Test A").scripts.OnClick(MenuRow(2, "Test A"))
+	dlg.accept.scripts.OnClick(dlg.accept)
+	check(not ns.Snapshots()["Test A"] and lastPrint():find("deleted snapshot 'Test A'", 1, true), mode .. ": Delete removes it")
+
+	-- Restore originals: confirm dialog.
+	local restoreButton = ButtonNamed("Restore originals")
+	ns.Set("horizonStart", "5000")
+	restoreButton.scripts.OnClick(restoreButton)
+	check(dlg:IsShown() and dlg.text.text:find("^Restore all %d+ changed settings"), mode .. ": Restore originals asks first")
+	dlg.cancel.scripts.OnClick(dlg.cancel)
+	check(cvars.horizonStart == "5000", mode .. ": No changes nothing")
+	restoreButton.scripts.OnClick(restoreButton)
+	dlg.accept.scripts.OnClick(dlg.accept)
+	check(not dlg:IsShown() and cvars.horizonStart == "2400" and lastPrint():find("restored %d+ settings"), mode .. ": Yes restores")
+
+	-- Fog test menu.
+	local fogButton = ButtonNamed("Fog test")
+	fogButton.scripts.OnClick(fogButton)
+	texts = table.concat(Texts(1), "|")
+	check(menu.open and texts:find("^Fog test|Full test %(about %d+ seconds%)|Quick test %(about %d+ seconds%)|More haze tests %(about %d+ seconds%)$"),
+		mode .. ": the fog test menu lists its three tests (" .. texts .. ")")
+	fogButton.scripts.OnClick(fogButton)
+	check(not menu.open, mode .. ": the button closes it again")
 
 	---------------------------------------------------------------------------
 	-- Ground clutter: presets past the game's slider, raid copies, game-max tag
@@ -397,8 +553,12 @@ local function Suite(deferEvents)
 	ns.Set("volumeFogLevel", "4")
 	local base = snapshot()
 	SlashCmdList.GRAPHICSLAB("fogtest quick")
-	check(popups[#popups].which == "GRAPHICSLAB_FOGTEST" and popups[#popups].data == "quick", mode .. ": /glab fogtest quick asks first")
-	StaticPopupDialogs.GRAPHICSLAB_FOGTEST.OnAccept(nil, popups[#popups].data)
+	local dlg = ns.Popup.dialog
+	check(dlg and dlg:IsShown() and dlg.text.text:find(("Fog test (about %d seconds)"):format(ns.EstimateFogTest("quick")), 1, true),
+		mode .. ": /glab fogtest quick asks first, in the addon's own dialog")
+	check(dlg.accept.text == "Start" and dlg.cancel.text == "Cancel" and not dlg.edit:IsShown(), mode .. ": Start / Cancel, no text field")
+	dlg.accept.scripts.OnClick(dlg.accept)
+	check(not dlg:IsShown() and not ns.FogTestRunning(), mode .. ": the dialog closes first, the test waits")
 	advance(0.35)
 	check(ns.FogTestRunning() and ns.testActive, mode .. ": test started after the popup closed")
 	advance(1.5)
@@ -438,11 +598,13 @@ local function Suite(deferEvents)
 	check(sawCompute, mode .. ": side effects of compute effects are logged")
 	check(sawClamp, mode .. ": requested and stored values are logged")
 	check(lastPrint():find("fog test finished", 1, true), mode .. ": prints the result")
-	check(popups[#popups].which == "GRAPHICSLAB_FOGTEST_DONE", mode .. ": offers a reload to save the results")
+	check(dlg:IsShown() and dlg.text.text:find(("Fog test finished (%d screenshots)"):format(#rec.shots), 1, true),
+		mode .. ": offers a reload to save the results")
+	check(dlg.accept.text == "Reload" and dlg.cancel.text == "Later", mode .. ": Reload / Later")
 	advance(1)
 	check(not ns.testActive, mode .. ": change tracking resumes after the test")
-	StaticPopupDialogs.GRAPHICSLAB_FOGTEST_DONE.OnAccept()
-	check(reloads == 1, mode .. ": the done popup reloads")
+	dlg.accept.scripts.OnClick(dlg.accept)
+	check(reloads == 1 and not dlg:IsShown(), mode .. ": the done dialog reloads")
 
 	-- Outside changes are tracked again afterwards.
 	C_CVar.SetCVar("volumeFogLevel", "2")
@@ -455,8 +617,12 @@ local function Suite(deferEvents)
 	---------------------------------------------------------------------------
 	base = snapshot()
 	SlashCmdList.GRAPHICSLAB("fogtest more")
-	check(popups[#popups].data == "more", mode .. ": /glab fogtest more asks first")
-	StaticPopupDialogs.GRAPHICSLAB_FOGTEST.OnAccept(nil, "more")
+	check(dlg:IsShown() and dlg.text.text:find(("about %d seconds"):format(ns.EstimateFogTest("more")), 1, true), mode .. ": /glab fogtest more asks first")
+	dlg.cancel.scripts.OnClick(dlg.cancel)
+	advance(1)
+	check(not dlg:IsShown() and not ns.FogTestRunning(), mode .. ": Cancel starts nothing")
+	SlashCmdList.GRAPHICSLAB("fogtest more")
+	dlg.accept.scripts.OnClick(dlg.accept)
 	advance(150)
 	check(not ns.FogTestRunning(), mode .. ": the more set finishes")
 	local okMore, whyMore = same(base, cvars)
@@ -556,4 +722,15 @@ end
 
 Suite(false)
 Suite(true)
+
+-- No Blizzard menu or popup code anywhere in the addon: opened from addon code it runs the
+-- gamepad window manager under addon taint (A and B dead until /reload).
+for _, file in ipairs(FILES) do
+	local fh = assert(io.open(file, "r"))
+	local text = fh:read("*a")
+	fh:close()
+	for _, banned in ipairs({ "MenuUtil", "StaticPopup", "UIDropDownMenu", "EasyMenu" }) do
+		check(not text:find(banned, 1, true), file .. " must not use " .. banned)
+	end
+end
 realPrint(("GraphicsLab smoke: %d checks passed"):format(assertions))
