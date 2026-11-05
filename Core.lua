@@ -7,7 +7,7 @@
 --   keep       = { [cvar] = value }  values put back whenever something else changes them
 --   keepResend = { [cvar] = true }   kept values that are also re-sent every second (experimental)
 --   snapshots  = { [name] = { date, values = { [cvar] = value } } }
---   probe      = { build, names = { cvar, ... } }
+--   probe      = { build, names = { cvar, ... } }  hidden settings confirmed by /glab probe
 --   fogtest    = the last fog test run (FogTest.lua)
 --   linkRaid, reapply = booleans
 
@@ -17,7 +17,6 @@ local GetCVar, SetCVar, GetCVarInfo = C_CVar.GetCVar, C_CVar.SetCVar, C_CVar.Get
 local GetAllCommands = ConsoleGetAllCommands or (C_Console and C_Console.GetAllCommands)
 
 local CATEGORY = { [0] = "Debug", "Graphics", "Console", "Combat", "Game", "Default", "Net", "Sound", "Gm", "Reveal", "None" }
-local PROBE_CHUNK = 2500
 
 ns.registry = {}   -- [lower name] = { name, help, category, hidden }
 ns.specs = {}      -- [lower name] = curated spec
@@ -77,51 +76,44 @@ local function BuildRegistry()
 	end
 end
 
--- Probes the candidates now when they are still loaded; otherwise forgets the
--- cached result so the next login/reload keeps the list and probes again.
-function ns.RequestProbe()
-	if ns.candidates then return ns.Probe() end
-	DB.probe = nil
-	ns.Print("hidden-CVar cache cleared. /reload to probe again.")
+-- The known hidden names: curated rows (the "Experimental (hidden)" topic, for one)
+-- whose CVar the client does not list. The old once-per-build sweep over exe
+-- strings (Candidates.lua) found nothing on this client and was dropped in 0.4.3.
+local function ProbeNames()
+	local names = {}
+	for _, cat in ipairs(ns.categories) do
+		for _, spec in ipairs(cat) do
+			local e = ns.Lookup(spec.cvar)
+			if spec.kind ~= "presets" and (not e or e.hidden) then names[#names + 1] = spec.cvar end
+		end
+	end
+	return names
 end
 
--- Probe exe-derived names with GetCVar (read-only) to find CVars the client does not list.
+-- On demand only (/glab probe): reads the known hidden names with GetCVar
+-- (read-only) and remembers the ones this build has, so their rows also appear
+-- at the next login.
 function ns.Probe(onDone)
-	local cands = ns.candidates
-	if not cands then
-		ns.Print("candidate list already released; /reload to probe again.")
-		return
-	end
-	local found, i = {}, 1
-	local function Step()
-		local stop = math.min(i + PROBE_CHUNK - 1, #cands)
-		for j = i, stop do
-			local name = cands[j]
-			if not ns.registry[name:lower()] and GetCVar(name) ~= nil then
-				found[#found + 1] = name
-				Register(name, nil, "Hidden", true)
-			end
-		end
-		i = stop + 1
-		if i <= #cands then
-			C_Timer.After(0, Step)
-		else
-			DB.probe = { build = Build(), names = found }
-			ns.candidates = nil
-			-- The login snapshot predates the probe; add the hidden CVars' pre-change values to it.
-			local before = DB.snapshots["Before GraphicsLab"]
-			if before then
-				for _, name in ipairs(found) do
-					local key = name:lower()
-					if before.values[key] == nil then before.values[key] = DB.original[key] or GetCVar(name) end
-				end
-			end
-			ns.Print("probe finished: %d hidden CVars found.", #found)
-			Notify(nil)
-			if onDone then onDone(found) end
+	local found = {}
+	for _, name in ipairs(ProbeNames()) do
+		if GetCVar(name) ~= nil then
+			found[#found + 1] = name
+			Register(name, nil, "Hidden", true)
 		end
 	end
-	Step()
+	DB.probe = { build = Build(), names = found }
+	-- The login snapshot predates the probe; add the hidden CVars' pre-change values to it.
+	local before = DB.snapshots["Before GraphicsLab"]
+	if before then
+		for _, name in ipairs(found) do
+			local key = name:lower()
+			if before.values[key] == nil then before.values[key] = DB.original[key] or GetCVar(name) end
+		end
+	end
+	ns.Print("probe finished: %d hidden settings found.", #found)
+	Notify(nil)
+	if onDone then onDone(found) end
+	return found
 end
 
 ---------------------------------------------------------------------------
@@ -445,11 +437,6 @@ f:SetScript("OnEvent", function(_, event, arg1, arg2)
 		end
 		if DB.reapply then Reapply() end
 		ns.UpdateKeepTicker()
-		if not DB.probe or DB.probe.build ~= Build() then
-			C_Timer.After(3, function() ns.Probe() end)
-		else
-			ns.candidates = nil
-		end
 	elseif event == "CVAR_UPDATE" and not writing and DB and not ns.testActive then
 		local key = arg1 and arg1:lower()
 		if not key then return end

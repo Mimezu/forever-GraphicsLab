@@ -1,14 +1,13 @@
 ## Interface: 16001
 ## Title: GraphicsLab
 ## Notes: Extended graphics settings: live-tweak every visual CVar (including hidden ones), keep values the game resets, restore your originals, save snapshots, and test which fog settings really work. /glab
-## Version: 0.4.2
+## Version: 0.4.3
 ## SavedVariables: GraphicsLabDB
 ## IconTexture: Interface\Icons\INV_Misc_Spyglass_03
 ## Category: Mimezu's Suite
 
 Specs.lua
 Core.lua
-Candidates.lua
 Trace.lua
 FogTest.lua
 UI.lua

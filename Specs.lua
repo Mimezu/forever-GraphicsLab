@@ -233,7 +233,7 @@ ns.categories = {
 		R("ThreadPoolLimitLP", "Low-priority job threads", 1, 32, 1, nil, RESTART),
 	},
 	{
-		-- Hidden names from WowB.exe that look like visual knobs. Rows only appear if the probe confirms they exist.
+		-- Hidden names from WowB.exe that look like visual knobs. Rows only appear when the client has them (checked at login and by /glab probe).
 		key = "experimental", title = "Experimental (hidden)",
 		R("skyNoiseStrength", "Sky noise strength", 0, 4, 0.05),
 		R("cloudNoiseStrength", "Cloud noise strength", 0, 4, 0.05),

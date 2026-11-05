@@ -1,7 +1,7 @@
 -- Run from the addon folder: lua5.1 tests/Smoke.lua
 -- Loads GraphicsLab against a mocked Forever client (CVars with engine side effects, events,
 -- timers, screenshots, interface visibility) and checks: /glab opens on the first try, kept
--- values come back, re-send, and the fog test (sequence, restore, stops, /reload recovery).
+-- values come back, re-send, /glab probe (on demand, known names only), and the fog test (sequence, restore, stops, /reload recovery).
 -- The whole suite runs twice: CVAR_UPDATE delivered during SetCVar, and delivered a frame later.
 
 local realPrint = print
@@ -12,7 +12,7 @@ local function check(value, message)
 end
 
 local ADDON = "GraphicsLab"
-local FILES = { "Specs.lua", "Core.lua", "Candidates.lua", "Trace.lua", "FogTest.lua", "UI.lua" }
+local FILES = { "Specs.lua", "Core.lua", "Trace.lua", "FogTest.lua", "UI.lua" }
 
 local function Suite(deferEvents)
 	---------------------------------------------------------------------------
@@ -254,7 +254,7 @@ local function Suite(deferEvents)
 		fire("ADDON_LOADED", ADDON)
 		fire("PLAYER_LOGIN")
 		fire("PLAYER_ENTERING_WORLD")
-		advance(10) -- hidden-CVar probe runs 3 s after login
+		advance(10) -- login timers (keep check, reapply) settle
 	end
 	local function snapshot() local t = {} for k, v in pairs(cvars) do t[k] = v end return t end
 	local function same(a, b)
@@ -266,7 +266,21 @@ local function Suite(deferEvents)
 	GraphicsLabDB = nil
 	Load()
 	local mode = deferEvents and "deferred events" or "immediate events"
-	check(ns.DB().probe and #ns.DB().probe.names == 0, mode .. ": probe finds no hidden CVars in the mock")
+	check(ns.DB().probe == nil, mode .. ": no hidden-CVar probe at login")
+
+	---------------------------------------------------------------------------
+	-- /glab probe: on demand, over the known experimental names only
+	---------------------------------------------------------------------------
+	silent("skyNoiseStrength", "1"); defaults.skyNoiseStrength = "1" -- exists, but the client does not list it
+	SlashCmdList.GRAPHICSLAB("probe")
+	check(ns.DB().probe and ns.DB().probe.build == "70009", mode .. ": /glab probe stores a result for this build")
+	check(#ns.DB().probe.names == 1 and ns.DB().probe.names[1] == "skyNoiseStrength", mode .. ": the probe finds the unlisted experimental setting")
+	check(ns.Lookup("skyNoiseStrength") and ns.Lookup("skyNoiseStrength").hidden, mode .. ": it is registered as hidden")
+	check(not ns.Lookup("cloudNoiseStrength") and not ns.Lookup("showFog"), mode .. ": names the client lacks stay out")
+	check(lastPrint():find("1 hidden settings found", 1, true), mode .. ": the probe reports its count")
+	check(GraphicsLabDB.snapshots["Before GraphicsLab"].values.skynoisestrength == "1", mode .. ": the login snapshot learns the hidden value")
+	Load()
+	check(ns.Lookup("skyNoiseStrength") and ns.Lookup("skyNoiseStrength").hidden, mode .. ": a reload keeps the confirmed row")
 
 	---------------------------------------------------------------------------
 	-- /glab opens on the first try

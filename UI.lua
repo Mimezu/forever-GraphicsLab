@@ -455,7 +455,7 @@ function UpdateStatus()
 	local hidden = hiddenCount
 	local extra = n > MAX_ROWS and ("  |cffff9f26showing %d of %d, refine the search|r"):format(MAX_ROWS, n) or ""
 	statusText:SetText(("%d settings  |  %d changed  |  %d kept  |  %d hidden%s%s"):format(
-		n, ns.ChangedCount(), ns.KeptCount(), hidden, ns.DB().probe and "" or " (probing...)", extra))
+		n, ns.ChangedCount(), ns.KeptCount(), hidden, ns.DB().probe and "" or " (not probed)", extra))
 end
 
 local function Render()
@@ -730,8 +730,15 @@ local function CreateMainFrame()
 	restore:SetPoint("BOTTOMLEFT", 12, 12)
 	local snaps = MakeButton(frame, "Snapshots", 110, function(self) SnapshotMenu(self) end)
 	snaps:SetPoint("LEFT", restore, "RIGHT", 6, 0)
-	local probe = MakeButton(frame, "Re-probe hidden", 120, function() ns.RequestProbe() end)
+	local probe = MakeButton(frame, "Probe hidden", 120, function() ns.Probe() end)
 	probe:SetPoint("LEFT", snaps, "RIGHT", 6, 0)
+	probe:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("Probe hidden", 1, 1, 1)
+		GameTooltip:AddLine("Checks which of the Experimental (hidden) settings this build has. Same as /glab probe.", 1, 0.82, 0, true)
+		GameTooltip:Show()
+	end)
+	probe:SetScript("OnLeave", GameTooltip_Hide)
 	local fogtest = MakeButton(frame, "Fog test", 90, function(self) FogTestMenu(self) end)
 	fogtest:SetPoint("LEFT", probe, "RIGHT", 6, 0)
 	fogtest:SetScript("OnEnter", function(self)
@@ -770,7 +777,7 @@ SlashCmdList.GRAPHICSLAB = function(msg)
 	elseif msg == "trace clear" then
 		ns.ClearTrace()
 	elseif msg == "probe" then
-		ns.RequestProbe()
+		ns.Probe()
 	elseif msg == "fogtest" or msg == "fogtest full" then
 		ns.AskFogTest("full")
 	elseif msg == "fogtest quick" or msg == "fogtest more" then
@@ -779,7 +786,7 @@ SlashCmdList.GRAPHICSLAB = function(msg)
 		ns.StopFogTest()
 	elseif msg == "help" then
 		ns.Print("/glab - open the window. /glab fogtest [quick | more | stop] - test which fog settings work here. "
-			.. "/glab restore - restore all originals. /glab trace - log setting changes. /glab probe - look for hidden settings again.")
+			.. "/glab restore - restore all originals. /glab trace - log setting changes. /glab probe - check which hidden (experimental) settings this build has.")
 	else
 		ns.Toggle()
 	end
