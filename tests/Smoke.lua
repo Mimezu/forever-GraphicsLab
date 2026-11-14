@@ -14,7 +14,7 @@ local function check(value, message)
 end
 
 local ADDON = "GraphicsLab"
-local FILES = { "Specs.lua", "Core.lua", "Trace.lua", "Popup.lua", "FogTest.lua", "UI.lua" }
+local FILES = { "Specs.lua", "Core.lua", "Trace.lua", "Popup.lua", "FogTest.lua", "Keys.lua", "UI.lua" }
 
 local function Suite(deferEvents)
 	---------------------------------------------------------------------------
@@ -247,6 +247,36 @@ local function Suite(deferEvents)
 	function SetUIVisibility(v) UIParent.shown = v end
 	function SetInWorldUIVisibility(v) uiWorld = v end
 
+	-- Key bindings, the minimap and the game's Settings.
+	local bindings, savedBindings, mods = { ["CTRL-G"] = "TOGGLEGUILDTAB" }, 0, {}
+	BINDING_NAME_TOGGLEGUILDTAB = "Guild"
+	function GetBindingKey(action)
+		local out = {}
+		for k, a in pairs(bindings) do if a == action then out[#out + 1] = k end end
+		table.sort(out)
+		return unpack(out)
+	end
+	function GetBindingAction(key) return bindings[key] or "" end
+	function GetBindingText(key) return key end
+	function SetBinding(key, action) bindings[key] = action; return true end
+	function SaveBindings() savedBindings = savedBindings + 1 end
+	function GetCurrentBindingSet() return 1 end
+	function IsAltKeyDown() return mods.alt end
+	function IsControlKeyDown() return mods.ctrl end
+	function IsShiftKeyDown() return mods.shift end
+	function GetCursorPosition() return -10, -10 end
+	Minimap = NewFrame("Frame", "Minimap")
+	function Minimap:GetWidth() return 140 end
+	function Minimap:GetCenter() return 0, 0 end
+	function Minimap:GetEffectiveScale() return 1 end
+	local settingsCategories = {}
+	Settings = {
+		RegisterCanvasLayoutCategory = function(panel, name) return { panel = panel, name = name } end,
+		RegisterAddOnCategory = function(cat) settingsCategories[#settingsCategories + 1] = cat end,
+	}
+	SettingsPanel = NewFrame("Frame", "SettingsPanel")
+	function HideUIPanel(f) f:Hide() end
+
 	local ns
 	local function Load()
 		listeners = {}
@@ -283,6 +313,18 @@ local function Suite(deferEvents)
 	Load()
 	check(ns.Lookup("skyNoiseStrength") and ns.Lookup("skyNoiseStrength").hidden, mode .. ": a reload keeps the confirmed row")
 
+	-- The newest frame with this text (a check's label lives on its .text font string).
+	local function ButtonNamedEarly(text, isCheck)
+		for i = #allFrames, 1, -1 do
+			local fr = allFrames[i]
+			if isCheck then
+				if fr.kind == "CheckButton" and type(fr.text) == "table" and fr.text.text == text then return fr end
+			elseif fr.text == text and fr.scripts.OnClick then
+				return fr
+			end
+		end
+	end
+
 	---------------------------------------------------------------------------
 	-- /glab opens on the first try
 	---------------------------------------------------------------------------
@@ -293,6 +335,73 @@ local function Suite(deferEvents)
 	check(not GraphicsLabFrame:IsShown(), mode .. ": the second /glab closes it")
 	SlashCmdList.GRAPHICSLAB("")
 	check(GraphicsLabFrame:IsShown(), mode .. ": the third /glab opens it again")
+
+	---------------------------------------------------------------------------
+	-- Window key, minimap button, Settings page
+	---------------------------------------------------------------------------
+	check(BINDING_NAME_GRAPHICSLAB_TOGGLE and GraphicsLab_Toggle, mode .. ": the toggle binding has a name and a function")
+	GraphicsLab_Toggle()
+	check(not GraphicsLabFrame:IsShown(), mode .. ": the binding closes the window")
+	GraphicsLab_Toggle()
+	check(GraphicsLabFrame:IsShown(), mode .. ": and opens it")
+	local keyButton = ButtonNamedEarly("Not set")
+	check(keyButton, mode .. ": the window shows the key, not set yet")
+	keyButton.scripts.OnClick(keyButton, "LeftButton")
+	check(keyButton.text == "Press a key", mode .. ": a click listens for a key")
+	local catch = ns.KeyCatcherForTests()
+	catch.scripts.OnKeyDown(catch, "LCTRL")
+	check(keyButton.text == "Press a key", mode .. ": a modifier alone waits")
+	catch.scripts.OnKeyDown(catch, "ESCAPE")
+	check(keyButton.text == "Not set" and not catch:IsShown(), mode .. ": Escape cancels")
+	keyButton.scripts.OnClick(keyButton, "LeftButton")
+	mods.alt = true
+	catch.scripts.OnKeyDown(catch, "G")
+	mods.alt = nil
+	check(bindings["ALT-G"] == "GRAPHICSLAB_TOGGLE" and keyButton.text == "ALT-G", mode .. ": modifiers combine and the key binds")
+	check(savedBindings > 0, mode .. ": bindings are saved")
+	keyButton.scripts.OnClick(keyButton, "LeftButton")
+	mods.ctrl = true
+	catch.scripts.OnKeyDown(catch, "G")
+	mods.ctrl = nil
+	local kdlg = ns.Popup.dialog
+	check(kdlg:IsShown() and kdlg.text.text:find("CTRL-G is Guild", 1, true), mode .. ": a taken key is asked about")
+	check(bindings["CTRL-G"] == "TOGGLEGUILDTAB", mode .. ": nothing changes before the answer")
+	kdlg.accept.scripts.OnClick(kdlg.accept)
+	check(bindings["CTRL-G"] == "GRAPHICSLAB_TOGGLE" and bindings["ALT-G"] == nil, mode .. ": replacing moves the key")
+	keyButton.scripts.OnClick(keyButton, "RightButton")
+	check(GetBindingKey("GRAPHICSLAB_TOGGLE") == nil and keyButton.text == "Not set", mode .. ": right-click clears")
+	combat = true
+	keyButton.scripts.OnClick(keyButton, "LeftButton")
+	check(keyButton.text == "Not set" and lastPrint():find("not in combat", 1, true), mode .. ": no key setting in combat")
+	combat = false
+	bindings["CTRL-G"] = "TOGGLEGUILDTAB"
+
+	local miniButton = GraphicsLabMinimapButton
+	check(miniButton and miniButton:IsShown(), mode .. ": the minimap button is shown by default")
+	miniButton.scripts.OnClick(miniButton)
+	check(not GraphicsLabFrame:IsShown(), mode .. ": the minimap button toggles the window")
+	miniButton.scripts.OnClick(miniButton)
+	miniButton.scripts.OnDragStart(miniButton)
+	check(miniButton.scripts.OnUpdate, mode .. ": dragging follows the cursor")
+	miniButton.scripts.OnUpdate(miniButton)
+	miniButton.scripts.OnDragStop(miniButton)
+	check(ns.DB().minimap.angle == 225, mode .. ": the dragged position is saved (" .. tostring(ns.DB().minimap.angle) .. ")")
+	local miniCheck = ButtonNamedEarly("Minimap icon", true)
+	check(miniCheck and miniCheck:GetChecked(), mode .. ": the window has a Minimap icon check")
+	miniCheck:SetChecked(false)
+	miniCheck.scripts.OnClick(miniCheck)
+	check(not miniButton:IsShown() and ns.DB().minimap.hide == true, mode .. ": unchecking hides the button and saves it")
+	ns.SetMinimapShown(true)
+	check(miniButton:IsShown() and miniCheck:GetChecked(), mode .. ": showing it again checks every box")
+
+	local cat = settingsCategories[#settingsCategories]
+	check(cat and cat.name == "GraphicsLab", mode .. ": a GraphicsLab page in the AddOns settings")
+	local openButton = ButtonNamedEarly("Open")
+	check(openButton and openButton.parent == cat.panel, mode .. ": the page has an Open button")
+	GraphicsLabFrame:Hide()
+	SettingsPanel:Show()
+	openButton.scripts.OnClick(openButton)
+	check(GraphicsLabFrame:IsShown() and not SettingsPanel:IsShown(), mode .. ": Open closes Settings and opens the window")
 
 	---------------------------------------------------------------------------
 	-- The addon's own menus and dialogs (nothing from Blizzard's menu or popup code)

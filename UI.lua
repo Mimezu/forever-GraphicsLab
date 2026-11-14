@@ -675,6 +675,12 @@ local function CreateMainFrame()
 		end
 	end
 
+	-- Window key and minimap icon, under the navigation (Keys.lua).
+	local key = ns.KeySetter(frame, 170)
+	key:SetPoint("BOTTOMLEFT", 12, 44)
+	local miniCheck = ns.MinimapCheck(frame)
+	miniCheck:SetPoint("BOTTOMLEFT", key, "TOPLEFT", -2, 6)
+
 	-- Top bar
 	searchBox = CreateFrame("EditBox", nil, frame, "SearchBoxTemplate")
 	searchBox:SetSize(260, 20)
@@ -756,6 +762,11 @@ function ns.Toggle()
 		return
 	end
 	frame:SetShown(not frame:IsShown())
+end
+
+function ns.Open()
+	if not frame then CreateMainFrame() end
+	frame:Show()
 end
 
 SLASH_GRAPHICSLAB1 = "/glab"

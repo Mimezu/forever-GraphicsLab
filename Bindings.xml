@@ -1,0 +1,5 @@
+<Bindings>
+	<Binding name="GRAPHICSLAB_TOGGLE" category="BINDING_CATEGORY_GRAPHICSLAB">
+		GraphicsLab_Toggle()
+	</Binding>
+</Bindings>
