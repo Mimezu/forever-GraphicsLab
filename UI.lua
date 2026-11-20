@@ -69,7 +69,7 @@ end
 -- Lowercase text searched for an entry; its parts do not change during a session.
 local function SearchText(e, spec)
 	if not e.searchText then
-		e.searchText = (e.name .. " " .. (spec.label or "") .. " " .. (e.help or "") .. " " .. (spec.note or "")):lower()
+		e.searchText = (e.name .. " " .. (spec and spec.label or "") .. " " .. (e.help or "") .. " " .. (spec and spec.note or "")):lower()
 	end
 	return e.searchText
 end
@@ -88,8 +88,9 @@ local function BuildItems()
 	local items = {}
 	if search ~= "" then
 		for _, e in ipairs(AllSorted()) do
-			local spec = SpecFor(e)
-			if SearchText(e, spec):find(search, 1, true) then items[#items + 1] = { entry = e, spec = spec } end
+			if SearchText(e, ns.specs[e.key]):find(search, 1, true) then
+				items[#items + 1] = { entry = e, spec = SpecFor(e) }
+			end
 		end
 	else
 		for _, cat in ipairs(ns.categories) do
