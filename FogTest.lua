@@ -76,7 +76,6 @@ local function CasesFor(mode)
 	end
 	return list
 end
-ns.fogTestCases = CASES
 ns.fogTestMore = MORE
 
 local run        -- the test in progress

@@ -59,7 +59,6 @@ local function CloseMenu()
 	menu.open, menu.owner = false, nil
 end
 ns.CloseMenu = CloseMenu
-function ns.MenuIsOpen() return menu.open end
 
 local function Panel(level)
 	if menu.panels[level] then return menu.panels[level] end
@@ -353,8 +352,4 @@ function ns.ShowDialog(opts)
 	d:Show()
 	if opts.editBox then d.edit:SetFocus(); d.edit:HighlightText() end
 	return d
-end
-
-function ns.HideDialog()
-	if dialog then dialog:Hide() end
 end
