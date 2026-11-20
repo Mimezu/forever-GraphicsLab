@@ -13,13 +13,20 @@ local rows, current = {}, "fog"
 -- Views
 ---------------------------------------------------------------------------
 
-local VISUAL = "fog|light|shadow|ssao|assao|cacao|bloom|sun|sky|cloud|horizon|clip|lod|mip|texture|particle|weather|water|ripple|reflect|refract|liquid|render|resample|aa|msaa|hdr|gamma|bright|contrast|outline|ffx|vrs|specular|glow|ground|doodad|wmo|terrain|entity|camera|fov|gx|volume|light"
+local VISUAL = "fog|light|shadow|ssao|assao|cacao|bloom|sun|sky|cloud|horizon|clip|lod|mip|texture|particle|weather|water|ripple|reflect|refract|liquid|render|resample|aa|msaa|hdr|gamma|bright|contrast|outline|ffx|vrs|specular|glow|ground|doodad|wmo|terrain|entity|camera|fov|gx|volume"
+local VISUAL_WORDS = {}
+for word in VISUAL:gmatch("[^|]+") do VISUAL_WORDS[#VISUAL_WORDS + 1] = word end
 
-local function IsVisual(name)
-	local low = name:lower()
-	for word in VISUAL:gmatch("[^|]+") do
-		if low:find(word, 1, true) then return true end
+-- Names never change: remember the answer on the entry.
+local function IsVisual(e)
+	if e.visual == nil then
+		local low, found = e.name:lower(), false
+		for _, word in ipairs(VISUAL_WORDS) do
+			if low:find(word, 1, true) then found = true; break end
+		end
+		e.visual = found
 	end
+	return e.visual
 end
 
 -- Pick a control for CVars that have no curated spec, using ranges from their help text.
@@ -77,7 +84,7 @@ end
 local VIEWS = {
 	{ key = "changed", title = "Changed", filter = function(key) return ns.IsChanged(key) end },
 	{ key = "allgfx", title = "All graphics", filter = function(key, e)
-		return e.category == "Graphics" or ns.specs[key] or (e.category == "Default" and IsVisual(e.name))
+		return e.category == "Graphics" or ns.specs[key] or (e.category == "Default" and IsVisual(e))
 	end },
 	{ key = "hidden", title = "Hidden (probed)", filter = function(_, e) return e.hidden end },
 	{ key = "everything", title = "Everything", filter = function() return true end },
